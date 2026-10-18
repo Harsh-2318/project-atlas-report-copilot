@@ -1,0 +1,51 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-atlas}:${MYSQL_PASSWORD:-atlas_password}@mysql:3306/${MYSQL_DATABASE:-atlas}
+      CHROMA_URL: http://chroma:8000
+      VECTOR_MODE: chroma
+    ports: ["8003:8000"]
+    depends_on:
+      mysql: { condition: service_healthy }
+      chroma: { condition: service_started }
+    restart: unless-stopped
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-atlas}
+      MYSQL_USER: ${MYSQL_USER:-atlas}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-atlas_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-root-password}
+    ports: ["3308:3306"]
+    volumes: ["mysql_data:/var/lib/mysql", "./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-change-root-password}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  chroma:
+    image: chromadb/chroma:0.5.23
+    ports: ["8002:8000"]
+    volumes: ["chroma_data:/chroma/chroma"]
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+  ui:
+    build: .
+    command: ["streamlit", "run", "ui/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment:
+      ATLAS_API_URL: http://api:8000
+    ports: ["8501:8501"]
+    depends_on: [api]
+    restart: unless-stopped
+  portal:
+    image: php:8.2-apache
+    ports: ["8080:80"]
+    volumes: ["./php:/var/www/html:ro"]
+    depends_on: [api]
+    profiles: ["portal-scaffold"]
+volumes:
+  mysql_data:
+  chroma_data:
